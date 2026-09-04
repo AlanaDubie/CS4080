@@ -1,0 +1,6 @@
+// Used for CHP 3 Challenge #1 pt 1 (testing edgcase of redeclaring variable)
+var a = 1;
+var a = 2;
+print a;
+
+// prints 2

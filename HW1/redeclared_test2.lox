@@ -1,0 +1,8 @@
+// Used for CHP 3 Challenge #1 pt2 (testing edgcase of redeclaring variable)
+{
+    var a = 1;
+    var a = 2;
+    print a;
+}
+
+// prints Error at 'a': Already a variable with this name in this scope
