@@ -58,11 +58,18 @@ class Parser {
 //< Statements and State expression
   }
 
-// CHALLENGE 1: Added comma expression parsing.
+// CHALLENGE 1: Added comma expression parsing
 // Comma is left-associative because each new expression
-// is combined with the expression parsed so far.
+// is combined with the expression parsed so far
   private Expr comma() {
-    Expr expr = assignment();
+    // CHALLENGE 1: Detect comma without left-hand operand
+    if (match(TokenType.COMMA)){
+      error(previous(), "Expect expression before ','");
+      conditional(); // Parse the right-hand side to continue parsing
+      return null; // Return null to indicate an error
+    }
+
+    Expr expr = conditional();
 
     while (match(TokenType.COMMA)) {
         Token operator = previous();
@@ -353,43 +360,64 @@ private Expr conditional() {
   }
 //< Statements and State parse-assignment
 //> Control Flow or
-  private Expr or() {
+private Expr or() {
+    // CHALLENGE 3: Detect "or" without a left-hand operand.
+    if (match(TokenType.OR)) {
+        error(previous(), "Expect expression.");
+        and(); // Parse and discard the right-hand operand.
+        return null;
+    }
+
     Expr expr = and();
 
-    while (match(OR)) {
-      Token operator = previous();
-      Expr right = and();
-      expr = new Expr.Logical(expr, operator, right);
+    while (match(TokenType.OR)) {
+        Token operator = previous();
+        Expr right = and();
+        expr = new Expr.Logical(expr, operator, right);
     }
 
     return expr;
-  }
+}
 //< Control Flow or
 //> Control Flow and
-  private Expr and() {
+private Expr and() {
+    // CHALLENGE 3: Detect "and" without a left-hand operand.
+    if (match(TokenType.AND)) {
+        error(previous(), "Expect expression.");
+        equality(); // Parse and discard the right-hand operand.
+        return null;
+    }
+
     Expr expr = equality();
 
-    while (match(AND)) {
-      Token operator = previous();
-      Expr right = equality();
-      expr = new Expr.Logical(expr, operator, right);
+    while (match(TokenType.AND)) {
+        Token operator = previous();
+        Expr right = equality();
+        expr = new Expr.Logical(expr, operator, right);
     }
 
     return expr;
-  }
+}
 //< Control Flow and
 //> equality
-  private Expr equality() {
+private Expr equality() {
+    // CHALLENGE 3: Detect equality operators without a left-hand operand.
+    if (match(TokenType.BANG_EQUAL, TokenType.EQUAL_EQUAL)) {
+        error(previous(), "Expect expression.");
+        comparison(); // Parse and discard the right-hand operand.
+        return null;
+    }
+
     Expr expr = comparison();
 
-    while (match(BANG_EQUAL, EQUAL_EQUAL)) {
-      Token operator = previous();
-      Expr right = comparison();
-      expr = new Expr.Binary(expr, operator, right);
+    while (match(TokenType.BANG_EQUAL, TokenType.EQUAL_EQUAL)) {
+        Token operator = previous();
+        Expr right = comparison();
+        expr = new Expr.Binary(expr, operator, right);
     }
 
     return expr;
-  }
+}
 //< equality
 //> comparison
   private Expr comparison() {
