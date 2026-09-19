@@ -74,6 +74,23 @@ class Parser {
     return expr;
 }
 
+// CHALLENGE 2: Added support for the conditional/ternary operator.
+private Expr conditional() {
+    Expr expr = or();
+
+    if (match(TokenType.QUESTION)) {
+        Expr thenBranch = expression();
+
+        consume(TokenType.COLON, "Expect ':' after then branch.");
+
+        Expr elseBranch = conditional();
+
+        expr = new Expr.Ternary(expr, thenBranch, elseBranch);
+    }
+
+    return expr;
+}
+
 //< expression
 //> Statements and State declaration
   private Stmt declaration() {

@@ -1,5 +1,5 @@
 //> Classes lox-instance
-package com.craftinginterpreters.lox;
+package HW3;
 
 import java.util.HashMap;
 import java.util.Map;

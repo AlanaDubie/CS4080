@@ -1,5 +1,5 @@
 //> Functions return-exception
-package com.craftinginterpreters.lox;
+package HW3;
 
 class Return extends RuntimeException {
   final Object value;
