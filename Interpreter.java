@@ -219,15 +219,15 @@ class Interpreter implements Expr.Visitor<Object>,
 //< Functions visit-return
 //> Statements and State visit-var
   @Override
-  public Void visitVarStmt(Stmt.Var stmt) {
-    Object value = null;
+public Void visitVarStmt(Stmt.Var stmt) {
+    Object value = Environment.UNINITIALIZED;
     if (stmt.initializer != null) {
       value = evaluate(stmt.initializer);
     }
 
     environment.define(stmt.name.lexeme, value);
     return null;
-  }
+}
 //< Statements and State visit-var
 //> Control Flow visit-while
   @Override

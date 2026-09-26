@@ -75,7 +75,7 @@ class Parser {
       return null; // Return null to indicate an error
     }
 
-    Expr expr = conditional();
+    Expr expr = assignment();
 
     while (match(TokenType.COMMA)) {
         Token operator = previous();
@@ -350,9 +350,7 @@ private Expr conditional() {
 /* Statements and State parse-assignment < Control Flow or-in-assignment
     Expr expr = equality();
 */
-//> Control Flow or-in-assignment
-    Expr expr = or();
-//< Control Flow or-in-assignment
+    Expr expr = conditional();
 
     if (match(TokenType.EQUAL)) {
       Token equals = previous();

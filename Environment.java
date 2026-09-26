@@ -1,9 +1,10 @@
-
-
 import java.util.HashMap;
 import java.util.Map;
 
 class Environment {
+//> uninitialized-sentinel
+  static final Object UNINITIALIZED = new Object();
+//< uninitialized-sentinel
 //> enclosing-field
   final Environment enclosing;
 //< enclosing-field
@@ -21,7 +22,12 @@ class Environment {
 
   Object get(Token name) {
     if (values.containsKey(name.lexeme)) {
-      return values.get(name.lexeme);
+      Object value = values.get(name.lexeme);
+      if (value == UNINITIALIZED) {
+        throw new RuntimeError(name,
+            "Variable '" + name.lexeme + "' must be initialized before use.");
+      }
+      return value;
     }
 //> environment-get-enclosing
 
@@ -68,7 +74,12 @@ class Environment {
 //< Resolving and Binding ancestor
 //> Resolving and Binding get-at
   Object getAt(int distance, String name) {
-    return ancestor(distance).values.get(name);
+    Object value = ancestor(distance).values.get(name);
+    if (value == UNINITIALIZED) {
+      throw new RuntimeError(new Token(TokenType.IDENTIFIER, name, null, -1),
+          "Variable '" + name + "' must be initialized before use.");
+    }
+    return value;
   }
 //< Resolving and Binding get-at
 //> Resolving and Binding assign-at
