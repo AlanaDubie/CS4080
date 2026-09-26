@@ -14,11 +14,20 @@ class Parser {
 
 //< parse-error
   private final List<Token> tokens;
+
+  // Chapter 8, CHALLENGE 1
+  private final boolean replMode;
   private int current = 0;
 
   Parser(List<Token> tokens) {
-    this.tokens = tokens;
+    this(tokens, false);
   }
+
+  Parser(List<Token> tokens, boolean replMode) {
+    this.tokens = tokens;
+    this.replMode = replMode;
+  }
+
 /* Parsing Expressions parse < Statements and State parse
   Expr parse() {
     try {
@@ -285,6 +294,15 @@ private Expr conditional() {
 //> Statements and State parse-expression-statement
   private Stmt expressionStatement() {
     Expr expr = expression();
+
+    // Chapter 8, CHALLENGE 1 REPL mode handling for bare expressions
+    if (replMode && isAtEnd()) {
+      // No semicolon, and nothing left to parse — they typed a bare
+      // expression at the prompt, so show its value instead of
+      // discarding it.
+      return new Stmt.Print(expr);
+    }
+
     consume(TokenType.SEMICOLON, "Expect ';' after expression.");
     return new Stmt.Expression(expr);
   }

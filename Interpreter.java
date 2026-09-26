@@ -11,13 +11,6 @@ import java.util.List;
 //< Statements and State import-list
 //> Resolving and Binding import-map
 import java.util.Map;
-//< Resolving and Binding import-map
-
-interface LoxCallable {
-  int arity();
-  Object call(Interpreter interpreter, List<Object> arguments);
-}
-
 /* Evaluating Expressions interpreter-class < Statements and State interpreter
 class Interpreter implements Expr.Visitor<Object> {
 */
