@@ -209,6 +209,11 @@ class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
   public String visitVariableExpr(Expr.Variable expr) {
     return expr.name.lexeme;
   }
+
+  @Override
+  public String visitBreakStmt(Stmt.Break stmt) {
+    return "(break)";
+  }
 //< Statements and State omit
 //< visit-methods
 //> print-utilities

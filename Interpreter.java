@@ -232,11 +232,23 @@ public Void visitVarStmt(Stmt.Var stmt) {
 //> Control Flow visit-while
   @Override
   public Void visitWhileStmt(Stmt.While stmt) {
-    while (isTruthy(evaluate(stmt.condition))) {
-      execute(stmt.body);
-    }
-    return null;
+      try {
+        while (isTruthy(evaluate(stmt.condition))) {
+          execute(stmt.body);
+        }
+      } catch (BreakException e) {
+        // Break out of the loop.
+      }
+      return null;
   }
+
+  @Override
+  public Void visitBreakStmt(Stmt.Break stmt) {
+      throw new BreakException();
+  }
+
+
+
 //< Control Flow visit-while
 //> Statements and State visit-assign
   @Override

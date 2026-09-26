@@ -17,6 +17,7 @@ class Parser {
 
   // Chapter 8, CHALLENGE 1
   private final boolean replMode;
+  private int loopDepth = 0; 
   private int current = 0;
 
   Parser(List<Token> tokens) {
@@ -169,7 +170,8 @@ private Expr conditional() {
 //< Control Flow match-while
 //> parse-block
     if (match(TokenType.LEFT_BRACE)) return new Stmt.Block(block());
-//< parse-block
+//< break state
+    if (match(TokenType.BREAK)) return breakStatement();
 
     return expressionStatement();
   }
@@ -208,7 +210,15 @@ private Expr conditional() {
     consume(TokenType.RIGHT_PAREN, "Expect ')' after for clauses.");
 //< for-increment
 //> for-body
-    Stmt body = statement();
+    loopDepth++;
+    try {
+      Stmt body = statement();
+
+      if (increment != null) {
+        body = new Stmt.Block(
+            Arrays.asList(body, new Stmt.Expression(increment)));
+      }
+
 
 //> for-desugar-increment
     if (increment != null) {
@@ -231,6 +241,9 @@ private Expr conditional() {
 
 //< for-desugar-initializer
     return body;
+  } finally {
+    loopDepth--;
+  }
 //< for-body
   }
 //< Control Flow for-statement
@@ -286,9 +299,14 @@ private Expr conditional() {
     consume(TokenType.LEFT_PAREN, "Expect '(' after 'while'.");
     Expr condition = expression();
     consume(TokenType.RIGHT_PAREN, "Expect ')' after condition.");
-    Stmt body = statement();
 
-    return new Stmt.While(condition, body);
+    loopDepth++;
+    try {
+      Stmt body = statement();
+      return new Stmt.While(condition, body);
+    } finally {
+      loopDepth--;
+    }
   }
 //< Control Flow while-statement
 //> Statements and State parse-expression-statement
@@ -306,6 +324,17 @@ private Expr conditional() {
     consume(TokenType.SEMICOLON, "Expect ';' after expression.");
     return new Stmt.Expression(expr);
   }
+
+  private Stmt breakStatement() {
+    Token keyword = previous();
+    if (loopDepth == 0) {
+      error(keyword, "Can't use 'break' outside of a loop.");
+    }
+    consume(TokenType.SEMICOLON, "Expect ';' after 'break'.");
+    return new Stmt.Break(keyword);
+  } 
+
+
 //< Statements and State parse-expression-statement
 //> Functions parse-function
   private Stmt.Function function(String kind) {
