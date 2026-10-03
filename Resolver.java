@@ -6,9 +6,23 @@ import java.util.Stack;
 
 class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
   private final Interpreter interpreter;
+
 //> scopes-field
-  private final Stack<Map<String, Boolean>> scopes = new Stack<>();
+  private final Stack<Map<String, VariableInfo>> scopes = new Stack<>();
+
+  private static class VariableInfo {
+    Token name;
+    boolean initialized;
+    boolean used;
+
+    VariableInfo(Token name) {
+      this.name = name;
+      this.initialized = false;
+      this.used = false;
+    }
+  }
 //< scopes-field
+
 //> function-type-field
   private FunctionType currentFunction = FunctionType.NONE;
 //< function-type-field
@@ -16,6 +30,7 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
   Resolver(Interpreter interpreter) {
     this.interpreter = interpreter;
   }
+
 //> function-type
   private enum FunctionType {
     NONE,
@@ -31,6 +46,7 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
 //< Classes function-type-method
   }
 //< function-type
+
 //> Classes class-type
 
   private enum ClassType {
@@ -47,6 +63,7 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
   private ClassType currentClass = ClassType.NONE;
 
 //< Classes class-type
+
 //> resolve-statements
   void resolve(List<Stmt> statements) {
     for (Stmt statement : statements) {
@@ -54,6 +71,7 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     }
   }
 //< resolve-statements
+
 //> visit-block-stmt
   @Override
   public Void visitBlockStmt(Stmt.Block stmt) {
@@ -63,16 +81,20 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     return null;
   }
 //< visit-block-stmt
+
 //> Classes resolver-visit-class
   @Override
   public Void visitClassStmt(Stmt.Class stmt) {
+
 //> set-current-class
     ClassType enclosingClass = currentClass;
     currentClass = ClassType.CLASS;
 
 //< set-current-class
+
     declare(stmt.name);
     define(stmt.name);
+
 //> Inheritance resolve-superclass
 
 //> inherit-self
@@ -83,35 +105,45 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     }
 
 //< inherit-self
+
     if (stmt.superclass != null) {
+
 //> set-current-subclass
       currentClass = ClassType.SUBCLASS;
 //< set-current-subclass
+
       resolve(stmt.superclass);
     }
 //< Inheritance resolve-superclass
+
 //> Inheritance begin-super-scope
 
     if (stmt.superclass != null) {
       beginScope();
-      scopes.peek().put("super", true);
+      scopes.peek().put("super", new VariableInfo(null));
+      scopes.peek().get("super").initialized = true;
     }
 //< Inheritance begin-super-scope
+
 //> resolve-methods
 
 //> resolver-begin-this-scope
     beginScope();
-    scopes.peek().put("this", true);
+    scopes.peek().put("this", new VariableInfo(null));
+    scopes.peek().get("this").initialized = true;
 
 //< resolver-begin-this-scope
+
     for (Stmt.Function method : stmt.methods) {
       FunctionType declaration = FunctionType.METHOD;
+
 //> resolver-initializer-type
       if (method.name.lexeme.equals("init")) {
         declaration = FunctionType.INITIALIZER;
       }
 
 //< resolver-initializer-type
+
       resolveFunction(method, declaration); // [local]
     }
 
@@ -120,16 +152,20 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
 
 //< resolver-end-this-scope
 //< resolve-methods
+
 //> Inheritance end-super-scope
     if (stmt.superclass != null) endScope();
 
 //< Inheritance end-super-scope
+
 //> restore-current-class
     currentClass = enclosingClass;
 //< restore-current-class
+
     return null;
   }
 //< Classes resolver-visit-class
+
 //> visit-expression-stmt
   @Override
   public Void visitExpressionStmt(Stmt.Expression stmt) {
@@ -137,6 +173,7 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     return null;
   }
 //< visit-expression-stmt
+
 //> visit-function-stmt
   @Override
   public Void visitFunctionStmt(Stmt.Function stmt) {
@@ -149,24 +186,31 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
 //> pass-function-type
     resolveFunction(stmt, FunctionType.FUNCTION);
 //< pass-function-type
+
     return null;
   }
 
   @Override
   public Void visitFunctionExpr(Expr.Function expr) {
-      resolveFunction(expr);
-      return null;
+    resolveFunction(expr);
+    return null;
   }
 //< visit-function-stmt
+
 //> visit-if-stmt
   @Override
   public Void visitIfStmt(Stmt.If stmt) {
     resolve(stmt.condition);
     resolve(stmt.thenBranch);
-    if (stmt.elseBranch != null) resolve(stmt.elseBranch);
+
+    if (stmt.elseBranch != null) {
+      resolve(stmt.elseBranch);
+    }
+
     return null;
   }
 //< visit-if-stmt
+
 //> visit-print-stmt
   @Override
   public Void visitPrintStmt(Stmt.Print stmt) {
@@ -174,16 +218,20 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     return null;
   }
 //< visit-print-stmt
+
 //> visit-return-stmt
   @Override
   public Void visitReturnStmt(Stmt.Return stmt) {
+
 //> return-from-top
     if (currentFunction == FunctionType.NONE) {
       Lox.error(stmt.keyword.line, "Can't return from top-level code.");
     }
 
 //< return-from-top
+
     if (stmt.value != null) {
+
 //> Classes return-in-initializer
       if (currentFunction == FunctionType.INITIALIZER) {
         Lox.error(stmt.keyword.line,
@@ -191,23 +239,29 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
       }
 
 //< Classes return-in-initializer
+
       resolve(stmt.value);
     }
 
     return null;
   }
 //< visit-return-stmt
+
 //> visit-var-stmt
   @Override
   public Void visitVarStmt(Stmt.Var stmt) {
     declare(stmt.name);
+
     if (stmt.initializer != null) {
       resolve(stmt.initializer);
     }
+
     define(stmt.name);
+
     return null;
   }
 //< visit-var-stmt
+
 //> visit-while-stmt
   @Override
   public Void visitWhileStmt(Stmt.While stmt) {
@@ -216,6 +270,7 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     return null;
   }
 //< visit-while-stmt
+
 //> visit-assign-expr
   @Override
   public Void visitAssignExpr(Expr.Assign expr) {
@@ -224,6 +279,7 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     return null;
   }
 //< visit-assign-expr
+
 //> visit-binary-expr
   @Override
   public Void visitBinaryExpr(Expr.Binary expr) {
@@ -232,6 +288,7 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     return null;
   }
 //< visit-binary-expr
+
 //> visit-call-expr
   @Override
   public Void visitCallExpr(Expr.Call expr) {
@@ -244,6 +301,7 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     return null;
   }
 //< visit-call-expr
+
 //> Classes resolver-visit-get
   @Override
   public Void visitGetExpr(Expr.Get expr) {
@@ -251,6 +309,7 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     return null;
   }
 //< Classes resolver-visit-get
+
 //> visit-grouping-expr
   @Override
   public Void visitGroupingExpr(Expr.Grouping expr) {
@@ -258,12 +317,14 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     return null;
   }
 //< visit-grouping-expr
+
 //> visit-literal-expr
   @Override
   public Void visitLiteralExpr(Expr.Literal expr) {
     return null;
   }
 //< visit-literal-expr
+
 //> visit-logical-expr
   @Override
   public Void visitLogicalExpr(Expr.Logical expr) {
@@ -272,6 +333,7 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     return null;
   }
 //< visit-logical-expr
+
 //> Classes resolver-visit-set
   @Override
   public Void visitSetExpr(Expr.Set expr) {
@@ -280,9 +342,11 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     return null;
   }
 //< Classes resolver-visit-set
+
 //> Inheritance resolve-super-expr
   @Override
   public Void visitSuperExpr(Expr.Super expr) {
+
 //> invalid-super
     if (currentClass == ClassType.NONE) {
       Lox.error(expr.keyword.line,
@@ -293,13 +357,16 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     }
 
 //< invalid-super
+
     resolveLocal(expr, expr.keyword);
     return null;
   }
 //< Inheritance resolve-super-expr
+
 //> Classes resolver-visit-this
   @Override
   public Void visitThisExpr(Expr.This expr) {
+
 //> this-outside-of-class
     if (currentClass == ClassType.NONE) {
       Lox.error(expr.keyword.line,
@@ -308,11 +375,13 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     }
 
 //< this-outside-of-class
+
     resolveLocal(expr, expr.keyword);
     return null;
   }
 
 //< Classes resolver-visit-this
+
   @Override
   public Void visitTernaryExpr(Expr.Ternary expr) {
     resolve(expr.condition);
@@ -328,11 +397,13 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     return null;
   }
 //< visit-unary-expr
+
 //> visit-variable-expr
   @Override
   public Void visitVariableExpr(Expr.Variable expr) {
     if (!scopes.isEmpty() &&
-        scopes.peek().get(expr.name.lexeme) == Boolean.FALSE) {
+        scopes.peek().containsKey(expr.name.lexeme) &&
+        !scopes.peek().get(expr.name.lexeme).initialized) {
       Lox.error(expr.name.line,
           "Can't read local variable in its own initializer.");
     }
@@ -346,18 +417,20 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     return null;
   }
 
-
 //< visit-variable-expr
+
 //> resolve-stmt
   private void resolve(Stmt stmt) {
     stmt.accept(this);
   }
 //< resolve-stmt
+
 //> resolve-expr
   private void resolve(Expr expr) {
     expr.accept(this);
   }
 //< resolve-expr
+
 //> resolve-function
 /* Resolving and Binding resolve-function < Resolving and Binding set-current-function
   private void resolveFunction(Stmt.Function function) {
@@ -369,18 +442,23 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     currentFunction = type;
 
 //< set-current-function
+
     beginScope();
+
     for (Token param : function.params) {
       declare(param);
       define(param);
     }
+
     resolve(function.body);
     endScope();
+
 //> restore-current-function
     currentFunction = enclosingFunction;
 //< restore-current-function
   }
 //< resolve-function
+
   private void resolveFunction(Expr.Function function) {
     FunctionType enclosingFunction = currentFunction;
     currentFunction = FunctionType.FUNCTION;
@@ -388,8 +466,8 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     beginScope();
 
     for (Token param : function.params) {
-        declare(param);
-        define(param);
+      declare(param);
+      define(param);
     }
 
     resolve(function.body);
@@ -397,22 +475,34 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     endScope();
 
     currentFunction = enclosingFunction;
-  } 
+  }
+
 //> begin-scope
   private void beginScope() {
-    scopes.push(new HashMap<String, Boolean>());
+    scopes.push(new HashMap<String, VariableInfo>());
   }
 //< begin-scope
+
 //> end-scope
   private void endScope() {
-    scopes.pop();
+    Map<String, VariableInfo> scope = scopes.pop();
+
+    for (VariableInfo variable : scope.values()) {
+      // "this" and "super" are automatically added by the resolver.
+      if (variable.name != null && !variable.used) {
+        Lox.error(variable.name.line,
+            "Local variable '" + variable.name.lexeme + "' is never used.");
+      }
+    }
   }
 //< end-scope
+
 //> declare
   private void declare(Token name) {
     if (scopes.isEmpty()) return;
 
-    Map<String, Boolean> scope = scopes.peek();
+    Map<String, VariableInfo> scope = scopes.peek();
+
 //> duplicate-variable
     if (scope.containsKey(name.lexeme)) {
       Lox.error(name.line,
@@ -420,19 +510,27 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     }
 
 //< duplicate-variable
-    scope.put(name.lexeme, false);
+
+    scope.put(name.lexeme, new VariableInfo(name));
   }
 //< declare
+
 //> define
   private void define(Token name) {
     if (scopes.isEmpty()) return;
-    scopes.peek().put(name.lexeme, true);
+
+    scopes.peek().get(name.lexeme).initialized = true;
   }
 //< define
+
 //> resolve-local
   private void resolveLocal(Expr expr, Token name) {
     for (int i = scopes.size() - 1; i >= 0; i--) {
       if (scopes.get(i).containsKey(name.lexeme)) {
+
+        // The variable was found, so it is being used.
+        scopes.get(i).get(name.lexeme).used = true;
+
         interpreter.resolve(expr, scopes.size() - 1 - i);
         return;
       }
