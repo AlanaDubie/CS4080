@@ -26,6 +26,15 @@ class LoxFunction implements LoxCallable {
 //< closure-constructor
     this.declaration = declaration;
   }
+  LoxFunction(Expr.Function declaration, Environment closure) {
+    this.declaration = new Stmt.Function(
+        null,
+        declaration.params,
+        declaration.body
+    );
+    this.closure = closure;
+    this.isInitializer = false;
+  }
 //> Classes bind-instance
   LoxFunction bind(LoxInstance instance) {
     Environment environment = new Environment(closure);

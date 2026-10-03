@@ -147,6 +147,25 @@ class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
   }
 //< Functions omit
 //> Classes omit
+  @Override
+  public String visitFunctionExpr(Expr.Function expr) {
+    StringBuilder builder = new StringBuilder();
+    builder.append("(fun (");
+
+    for (Token param : expr.params) {
+      if (param != expr.params.get(0)) builder.append(" ");
+      builder.append(param.lexeme);
+    }
+
+    builder.append(") ");
+
+    for (Stmt body : expr.body) {
+      builder.append(body.accept(this));
+    }
+
+    builder.append(")");
+    return builder.toString();
+  }
 
   @Override
   public String visitGetExpr(Expr.Get expr) {
@@ -214,6 +233,8 @@ class AstPrinter implements Expr.Visitor<String>, Stmt.Visitor<String> {
   public String visitBreakStmt(Stmt.Break stmt) {
     return "(break)";
   }
+
+  
 //< Statements and State omit
 //< visit-methods
 //> print-utilities

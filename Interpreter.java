@@ -188,6 +188,12 @@ class Interpreter implements Expr.Visitor<Object>,
     environment.define(stmt.name.lexeme, function);
     return null;
   }
+
+  //< Functions visit-function
+  @Override
+  public Object visitFunctionExpr(Expr.Function expr) {
+      return new LoxFunction(expr, environment);
+  }
 //< Functions visit-function
 //> Control Flow visit-if
   @Override

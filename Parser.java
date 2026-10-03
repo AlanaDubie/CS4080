@@ -113,7 +113,10 @@ private Expr conditional() {
       if (match(TokenType.CLASS)) return classDeclaration();
 //< Classes match-class
 //> Functions match-fun
-      if (match(TokenType.FUN)) return function("function");
+      if (check(TokenType.FUN) && checkNext(TokenType.IDENTIFIER)) {
+          advance();
+          return function("function");
+      }
 //< Functions match-fun
       if (match(TokenType.VAR)) return varDeclaration();
 
@@ -213,12 +216,6 @@ private Expr conditional() {
     loopDepth++;
     try {
       Stmt body = statement();
-
-      if (increment != null) {
-        body = new Stmt.Block(
-            Arrays.asList(body, new Stmt.Expression(increment)));
-      }
-
 
 //> for-desugar-increment
     if (increment != null) {
@@ -334,7 +331,6 @@ private Expr conditional() {
     return new Stmt.Break(keyword);
   } 
 
-
 //< Statements and State parse-expression-statement
 //> Functions parse-function
   private Stmt.Function function(String kind) {
@@ -361,6 +357,32 @@ private Expr conditional() {
     return new Stmt.Function(name, parameters, body);
 //< parse-body
   }
+  //< Functions parse-function
+  private Expr.Function anonymousFunction() {
+    consume(TokenType.LEFT_PAREN, "Expect '(' after 'fun'.");
+
+    List<Token> parameters = new ArrayList<>();
+
+    if (!check(TokenType.RIGHT_PAREN)) {
+        do {
+            if (parameters.size() >= 255) {
+                error(peek(), "Can't have more than 255 parameters.");
+            }
+
+            parameters.add(
+                consume(TokenType.IDENTIFIER, "Expect parameter name."));
+        } while (match(TokenType.COMMA));
+    }
+
+    consume(TokenType.RIGHT_PAREN, "Expect ')' after parameters.");
+
+    consume(TokenType.LEFT_BRACE, "Expect '{' before function body.");
+
+    List<Stmt> body = block();
+
+    return new Expr.Function(parameters, body);
+}
+
 //< Functions parse-function
 //> Statements and State block
   private List<Stmt> block() {
@@ -559,6 +581,7 @@ private Expr equality() {
 //< Functions call
 //> primary
   private Expr primary() {
+    if (match(TokenType.FUN)) return anonymousFunction();
     if (match(TokenType.FALSE)) return new Expr.Literal(false);
     if (match(TokenType.TRUE)) return new Expr.Literal(true);
     if (match(TokenType.NIL)) return new Expr.Literal(null);
@@ -616,6 +639,10 @@ private Expr equality() {
 
     throw error(peek(), message);
   }
+  private boolean checkNext(TokenType type) {
+    if (current + 1 >= tokens.size()) return false;
+    return tokens.get(current + 1).type == type;
+}
 //< consume
 //> check
   private boolean check(TokenType type) {

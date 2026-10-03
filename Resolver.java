@@ -151,6 +151,12 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
 //< pass-function-type
     return null;
   }
+
+  @Override
+  public Void visitFunctionExpr(Expr.Function expr) {
+      resolveFunction(expr);
+      return null;
+  }
 //< visit-function-stmt
 //> visit-if-stmt
   @Override
@@ -375,6 +381,23 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
 //< restore-current-function
   }
 //< resolve-function
+  private void resolveFunction(Expr.Function function) {
+    FunctionType enclosingFunction = currentFunction;
+    currentFunction = FunctionType.FUNCTION;
+
+    beginScope();
+
+    for (Token param : function.params) {
+        declare(param);
+        define(param);
+    }
+
+    resolve(function.body);
+
+    endScope();
+
+    currentFunction = enclosingFunction;
+  } 
 //> begin-scope
   private void beginScope() {
     scopes.push(new HashMap<String, Boolean>());
