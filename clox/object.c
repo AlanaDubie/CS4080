@@ -126,8 +126,7 @@ static ObjString* allocateString(const char* chars, int length,
   }
 
   push(OBJ_VAL(string));
-  tableSet(&vm.strings, string, NIL_VAL);
-  pop();
+  tableSet(&vm.strings, OBJ_VAL(string), NIL_VAL);  pop();
   return string;
 }
 //< allocate-string
