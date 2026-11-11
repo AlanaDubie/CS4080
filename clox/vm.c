@@ -562,6 +562,16 @@ static InterpretResult run() {
 //< Calls and Functions set-local
         break;
       }
+            case OP_GET_LOCAL_LONG: {
+        uint16_t slot = READ_SHORT();
+        push(frame->slots[slot]);
+        break;
+      }
+      case OP_SET_LOCAL_LONG: {
+        uint16_t slot = READ_SHORT();
+        frame->slots[slot] = peek(0);
+        break;
+      }
 //< Local Variables interpret-set-local
 //> Global Variables interpret-get-global
       case OP_GET_GLOBAL: {

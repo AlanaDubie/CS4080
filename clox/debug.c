@@ -76,6 +76,14 @@ static int jumpInstruction(const char* name, int sign,
          offset + 3 + sign * jump);
   return offset + 3;
 }
+
+static int longLocalInstruction(const char* name, Chunk* chunk, int offset) {
+  uint16_t slot = (uint16_t)((chunk->code[offset + 1] << 8) |
+                             chunk->code[offset + 2]);
+  printf("%-16s %4d\n", name, slot);
+  return offset + 3;
+}
+
 //< Jumping Back and Forth jump-instruction
 //> disassemble-instruction
 int disassembleInstruction(Chunk* chunk, int offset) {
@@ -117,6 +125,10 @@ int disassembleInstruction(Chunk* chunk, int offset) {
       return byteInstruction("OP_SET_LOCAL", chunk, offset);
 //< Local Variables disassemble-local
 //> Global Variables disassemble-get-global
+        case OP_GET_LOCAL_LONG:
+      return longLocalInstruction("OP_GET_LOCAL_LONG", chunk, offset);
+    case OP_SET_LOCAL_LONG:
+      return longLocalInstruction("OP_SET_LOCAL_LONG", chunk, offset);
     case OP_GET_GLOBAL:
       return constantInstruction("OP_GET_GLOBAL", chunk, offset);
 //< Global Variables disassemble-get-global

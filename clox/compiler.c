@@ -72,12 +72,15 @@ typedef struct {
 //> Closures is-captured-field
   bool isCaptured;
 //< Closures is-captured-field
+  bool isConst;
+
 } Local;
 //< Local Variables local-struct
 //> Closures upvalue-struct
 typedef struct {
   uint8_t index;
   bool isLocal;
+  bool isConst;
 } Upvalue;
 //< Closures upvalue-struct
 //> Calls and Functions function-type-enum
@@ -106,8 +109,9 @@ typedef struct Compiler {
   FunctionType type;
 
 //< Calls and Functions function-fields
-  Local locals[UINT8_COUNT];
+  Local* locals;
   int localCount;
+  int localCapacity;
 //> Closures upvalues-array
   Upvalue upvalues[UINT8_COUNT];
 //< Closures upvalues-array
@@ -129,6 +133,11 @@ Parser parser;
 //> Local Variables current-compiler
 Compiler* current = NULL;
 //< Local Variables current-compiler
+
+#define MAX_CONST_GLOBALS 256
+static Token constGlobals[MAX_CONST_GLOBALS];
+static int constGlobalCount = 0;
+
 //> Methods and Initializers current-class
 ClassCompiler* currentClass = NULL;
 //< Methods and Initializers current-class
@@ -225,6 +234,17 @@ static void emitBytes(uint8_t byte1, uint8_t byte2) {
   emitByte(byte1);
   emitByte(byte2);
 }
+
+// Slots above 255 don't fit in one byte, so they get a two-byte operand
+static void emitVariableOp(uint8_t op, int arg) {
+  if (op == OP_GET_LOCAL_LONG || op == OP_SET_LOCAL_LONG) {
+    emitByte(op);
+    emitByte((arg >> 8) & 0xff);
+    emitByte(arg & 0xff);
+  } else {
+    emitBytes(op, (uint8_t)arg);
+  }
+}
 //< Compiling Expressions emit-bytes
 //> Jumping Back and Forth emit-loop
 static void emitLoop(int loopStart) {
@@ -289,6 +309,18 @@ static void patchJump(int offset) {
   currentChunk()->code[offset] = (jump >> 8) & 0xff;
   currentChunk()->code[offset + 1] = jump & 0xff;
 }
+
+// Returns the next free local slot, growing the array if needed
+static Local* newLocalSlot() {
+  if (current->localCount == current->localCapacity) {
+    int oldCapacity = current->localCapacity;
+    current->localCapacity = GROW_CAPACITY(oldCapacity);
+    current->locals = GROW_ARRAY(Local, current->locals,
+                                 oldCapacity, current->localCapacity);
+  }
+  return &current->locals[current->localCount++];
+}
+
 //< Jumping Back and Forth patch-jump
 //> Local Variables init-compiler
 /* Local Variables init-compiler < Calls and Functions init-compiler
@@ -303,6 +335,10 @@ static void initCompiler(Compiler* compiler, FunctionType type) {
   compiler->type = type;
 //< Calls and Functions init-compiler
   compiler->localCount = 0;
+  compiler->localCapacity = 0;
+  compiler->locals = NULL;
+
+
   compiler->scopeDepth = 0;
 //> Calls and Functions init-function
   compiler->function = newFunction();
@@ -316,10 +352,11 @@ static void initCompiler(Compiler* compiler, FunctionType type) {
 //< Calls and Functions init-function-name
 //> Calls and Functions init-function-slot
 
-  Local* local = &current->locals[current->localCount++];
+  Local* local = newLocalSlot();
   local->depth = 0;
 //> Closures init-zero-local-is-captured
   local->isCaptured = false;
+  local->isConst = false;
 //< Closures init-zero-local-is-captured
 /* Calls and Functions init-function-slot < Methods and Initializers slot-zero
   local->name.start = "";
@@ -364,6 +401,7 @@ static ObjFunction* endCompiler() {
 //< dump-chunk
 //> Calls and Functions return-function
 
+  FREE_ARRAY(Local, current->locals, current->localCapacity);
 //> restore-enclosing
   current = current->enclosing;
 //< restore-enclosing
@@ -412,8 +450,17 @@ static void parsePrecedence(Precedence precedence);
 //< Compiling Expressions forward-declarations
 //> Global Variables identifier-constant
 static uint8_t identifierConstant(Token* name) {
-  return makeConstant(OBJ_VAL(copyString(name->start,
-                                         name->length)));
+  ObjString* string = copyString(name->start, name->length);
+  Value value = OBJ_VAL(string);
+
+  Chunk* chunk = currentChunk();
+  for (int i = 0; i < chunk->constants.count; i++) {
+    if (valuesEqual(chunk->constants.values[i], value)) {
+      return (uint8_t)i;
+    }
+  }
+
+  return makeConstant(value);
 }
 //< Global Variables identifier-constant
 //> Local Variables identifiers-equal
@@ -421,6 +468,31 @@ static bool identifiersEqual(Token* a, Token* b) {
   if (a->length != b->length) return false;
   return memcmp(a->start, b->start, a->length) == 0;
 }
+
+// Returns the index of name in the const globals list, or -1
+static int findConstGlobal(Token* name) {
+  for (int i = 0; i < constGlobalCount; i++) {
+    if (identifiersEqual(name, &constGlobals[i])) return i;
+  }
+  return -1;
+}
+
+static void addConstGlobal(Token name) {
+  if (constGlobalCount == MAX_CONST_GLOBALS) {
+    error("Too many const globals.");
+    return;
+  }
+  constGlobals[constGlobalCount++] = name;
+}
+
+// Used when a global is redeclared with var
+static void removeConstGlobal(Token* name) {
+  int i = findConstGlobal(name);
+  if (i == -1) return;
+  // Move the last entry into the gap
+  constGlobals[i] = constGlobals[--constGlobalCount];
+}
+
 //< Local Variables identifiers-equal
 //> Local Variables resolve-local
 static int resolveLocal(Compiler* compiler, Token* name) {
@@ -441,7 +513,7 @@ static int resolveLocal(Compiler* compiler, Token* name) {
 //< Local Variables resolve-local
 //> Closures add-upvalue
 static int addUpvalue(Compiler* compiler, uint8_t index,
-                      bool isLocal) {
+                      bool isLocal, bool isConst) {
   int upvalueCount = compiler->function->upvalueCount;
 //> existing-upvalue
 
@@ -462,6 +534,7 @@ static int addUpvalue(Compiler* compiler, uint8_t index,
 //< too-many-upvalues
   compiler->upvalues[upvalueCount].isLocal = isLocal;
   compiler->upvalues[upvalueCount].index = index;
+  compiler->upvalues[upvalueCount].isConst = isConst;
   return compiler->function->upvalueCount++;
 }
 //< Closures add-upvalue
@@ -471,16 +544,22 @@ static int resolveUpvalue(Compiler* compiler, Token* name) {
 
   int local = resolveLocal(compiler->enclosing, name);
   if (local != -1) {
+     if (local > UINT8_MAX) {
+      error("Can't capture a local variable past slot 255.");
+      return 0;
+    }
 //> mark-local-captured
     compiler->enclosing->locals[local].isCaptured = true;
+    bool isConst = compiler->enclosing->locals[local].isConst;
 //< mark-local-captured
-    return addUpvalue(compiler, (uint8_t)local, true);
+    return addUpvalue(compiler, (uint8_t)local, true, isConst);
   }
 
 //> resolve-upvalue-recurse
   int upvalue = resolveUpvalue(compiler->enclosing, name);
   if (upvalue != -1) {
-    return addUpvalue(compiler, (uint8_t)upvalue, false);
+    bool isConst = compiler->enclosing->upvalues[upvalue].isConst;
+    return addUpvalue(compiler, (uint8_t)upvalue, false, isConst);
   }
   
 //< resolve-upvalue-recurse
@@ -488,15 +567,15 @@ static int resolveUpvalue(Compiler* compiler, Token* name) {
 }
 //< Closures resolve-upvalue
 //> Local Variables add-local
-static void addLocal(Token name) {
+static void addLocal(Token name, bool isConst) {
 //> too-many-locals
-  if (current->localCount == UINT8_COUNT) {
+  if (current->localCount == UINT16_COUNT) {
     error("Too many local variables in function.");
     return;
   }
 
 //< too-many-locals
-  Local* local = &current->locals[current->localCount++];
+  Local* local = newLocalSlot();
   local->name = name;
 /* Local Variables add-local < Local Variables declare-undefined
   local->depth = current->scopeDepth;
@@ -507,10 +586,12 @@ static void addLocal(Token name) {
 //> Closures init-is-captured
   local->isCaptured = false;
 //< Closures init-is-captured
+  local->isConst = isConst;
+
 }
 //< Local Variables add-local
 //> Local Variables declare-variable
-static void declareVariable() {
+static void declareVariable(bool isConst) {
   if (current->scopeDepth == 0) return;
 
   Token* name = &parser.previous;
@@ -527,15 +608,15 @@ static void declareVariable() {
   }
 
 //< existing-in-scope
-  addLocal(*name);
+  addLocal(*name, isConst);
 }
 //< Local Variables declare-variable
 //> Global Variables parse-variable
-static uint8_t parseVariable(const char* errorMessage) {
+static uint8_t parseVariable(const char* errorMessage, bool isConst) {
   consume(TOKEN_IDENTIFIER, errorMessage);
 //> Local Variables parse-local
 
-  declareVariable();
+  declareVariable(isConst);
   if (current->scopeDepth > 0) return 0;
 
 //< Local Variables parse-local
@@ -724,8 +805,13 @@ static void namedVariable(Token name, bool canAssign) {
   uint8_t getOp, setOp;
   int arg = resolveLocal(current, &name);
   if (arg != -1) {
-    getOp = OP_GET_LOCAL;
-    setOp = OP_SET_LOCAL;
+    if (arg > UINT8_MAX) {
+      getOp = OP_GET_LOCAL_LONG;
+      setOp = OP_SET_LOCAL_LONG;
+    } else {
+      getOp = OP_GET_LOCAL;
+      setOp = OP_SET_LOCAL;
+    }
 //> Closures named-variable-upvalue
   } else if ((arg = resolveUpvalue(current, &name)) != -1) {
     getOp = OP_GET_UPVALUE;
@@ -746,21 +832,34 @@ static void namedVariable(Token name, bool canAssign) {
   if (match(TOKEN_EQUAL)) {
 */
 //> named-variable-can-assign
-  if (canAssign && match(TOKEN_EQUAL)) {
+    if (canAssign && match(TOKEN_EQUAL)) {
 //< named-variable-can-assign
+    // arg means something different for each kind of variable
+    bool isConstTarget;
+    if (getOp == OP_GET_LOCAL || getOp == OP_GET_LOCAL_LONG) {
+      isConstTarget = current->locals[arg].isConst;
+    } else if (getOp == OP_GET_UPVALUE) {
+      isConstTarget = current->upvalues[arg].isConst;
+    } else {
+      isConstTarget = findConstGlobal(&name) != -1;
+    }
+    if (isConstTarget) error("Can't assign to a const variable.");
+
     expression();
 /* Global Variables named-variable < Local Variables emit-set
     emitBytes(OP_SET_GLOBAL, arg);
 */
 //> Local Variables emit-set
-    emitBytes(setOp, (uint8_t)arg);
+    emitVariableOp(setOp, arg);
 //< Local Variables emit-set
-  } else {
+  } 
+  
+  else {
 /* Global Variables named-variable < Local Variables emit-get
     emitBytes(OP_GET_GLOBAL, arg);
 */
 //> Local Variables emit-get
-    emitBytes(getOp, (uint8_t)arg);
+    emitVariableOp(getOp, arg);
 //< Local Variables emit-get
   }
 //< named-variable
@@ -1055,7 +1154,7 @@ static void function(FunctionType type) {
       if (current->function->arity > 255) {
         errorAtCurrent("Can't have more than 255 parameters.");
       }
-      uint8_t constant = parseVariable("Expect parameter name.");
+      uint8_t constant = parseVariable("Expect parameter name.", false);
       defineVariable(constant);
     } while (match(TOKEN_COMMA));
   }
@@ -1113,7 +1212,7 @@ static void classDeclaration() {
   Token className = parser.previous;
 //< Methods and Initializers class-name
   uint8_t nameConstant = identifierConstant(&parser.previous);
-  declareVariable();
+  declareVariable(false);
 
   emitBytes(OP_CLASS, nameConstant);
   defineVariable(nameConstant);
@@ -1140,7 +1239,7 @@ static void classDeclaration() {
 //< inherit-self
 //> superclass-variable
     beginScope();
-    addLocal(syntheticToken("super"));
+    addLocal(syntheticToken("super"), false);
     defineVariable(0);
     
 //< superclass-variable
@@ -1179,25 +1278,34 @@ static void classDeclaration() {
 //< Classes and Instances class-declaration
 //> Calls and Functions fun-declaration
 static void funDeclaration() {
-  uint8_t global = parseVariable("Expect function name.");
+  uint8_t global = parseVariable("Expect function name.", false);
   markInitialized();
   function(TYPE_FUNCTION);
   defineVariable(global);
 }
 //< Calls and Functions fun-declaration
 //> Global Variables var-declaration
-static void varDeclaration() {
-  uint8_t global = parseVariable("Expect variable name.");
+static void varDeclaration(bool isConst) {
+  uint8_t global = parseVariable("Expect variable name.", isConst);
+  Token name = parser.previous;  // the variable's name
 
   if (match(TOKEN_EQUAL)) {
     expression();
   } else {
+    // A const can't be assigned later, so it needs a value now
+    if (isConst) error("A const variable must have an initializer.");
     emitByte(OP_NIL);
   }
   consume(TOKEN_SEMICOLON,
           "Expect ';' after variable declaration.");
 
   defineVariable(global);
+
+  // Locals keep their flag in Local, only globals need the list
+  if (current->scopeDepth == 0) {
+    if (isConst) addConstGlobal(name);
+    else removeConstGlobal(&name);
+  }
 }
 //< Global Variables var-declaration
 //> Global Variables expression-statement
@@ -1220,7 +1328,7 @@ static void forStatement() {
   if (match(TOKEN_SEMICOLON)) {
     // No initializer.
   } else if (match(TOKEN_VAR)) {
-    varDeclaration();
+    varDeclaration(false);
   } else {
     expressionStatement();
   }
@@ -1363,6 +1471,7 @@ static void synchronize() {
       case TOKEN_CLASS:
       case TOKEN_FUN:
       case TOKEN_VAR:
+      case TOKEN_CONST:
       case TOKEN_FOR:
       case TOKEN_IF:
       case TOKEN_WHILE:
@@ -1396,7 +1505,9 @@ static void declaration() {
   } else if (match(TOKEN_VAR)) {
 //< Calls and Functions match-fun
 //> match-var
-    varDeclaration();
+    varDeclaration(false);
+  } else if (match(TOKEN_CONST)) {
+    varDeclaration(true);
   } else {
     statement();
   }
@@ -1477,6 +1588,7 @@ ObjFunction* compile(const char* source) {
 */
 //> Calls and Functions call-init-compiler
   initCompiler(&compiler, TYPE_SCRIPT);
+  constGlobalCount = 0;
 //< Calls and Functions call-init-compiler
 /* Compiling Expressions init-compile-chunk < Calls and Functions call-init-compiler
   compilingChunk = chunk;
