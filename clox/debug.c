@@ -117,6 +117,8 @@ int disassembleInstruction(Chunk* chunk, int offset) {
 //> Global Variables disassemble-pop
     case OP_POP:
       return simpleInstruction("OP_POP", offset);
+    case OP_DUP:
+      return simpleInstruction("OP_DUP", offset);
 //< Global Variables disassemble-pop
 //> Local Variables disassemble-local
     case OP_GET_LOCAL:

@@ -96,6 +96,11 @@ typedef enum {
 } FunctionType;
 //< Calls and Functions function-type-enum
 //> Local Variables compiler-struct
+typedef struct Loop {
+  struct Loop* enclosing;
+  int start;       // where continue jumps to
+  int scopeDepth;  // scope depth of the loop body's surroundings
+} Loop;
 
 /* Local Variables compiler-struct < Calls and Functions enclosing-field
 typedef struct {
@@ -116,6 +121,7 @@ typedef struct Compiler {
   Upvalue upvalues[UINT8_COUNT];
 //< Closures upvalues-array
   int scopeDepth;
+  Loop* loop;
 } Compiler;
 //< Local Variables compiler-struct
 //> Methods and Initializers class-compiler-struct
@@ -340,6 +346,7 @@ static void initCompiler(Compiler* compiler, FunctionType type) {
 
 
   compiler->scopeDepth = 0;
+  compiler->loop = NULL;
 //> Calls and Functions init-function
   compiler->function = newFunction();
 //< Calls and Functions init-function
@@ -968,6 +975,12 @@ ParseRule rules[] = {
   [TOKEN_LEFT_BRACE]    = {NULL,     NULL,   PREC_NONE}, // [big]
   [TOKEN_RIGHT_BRACE]   = {NULL,     NULL,   PREC_NONE},
   [TOKEN_COMMA]         = {NULL,     NULL,   PREC_NONE},
+
+  [TOKEN_COLON]         = {NULL,     NULL,   PREC_NONE},
+  [TOKEN_CASE]          = {NULL,     NULL,   PREC_NONE},
+  [TOKEN_DEFAULT]       = {NULL,     NULL,   PREC_NONE},
+  [TOKEN_SWITCH]        = {NULL,     NULL,   PREC_NONE},
+  [TOKEN_CONTINUE]      = {NULL,     NULL,   PREC_NONE},
 /* Compiling Expressions rules < Classes and Instances table-dot
   [TOKEN_DOT]           = {NULL,     NULL,   PREC_NONE},
 */
@@ -1367,7 +1380,15 @@ static void forStatement() {
   }
 //< for-increment
 
+  Loop loop;
+  loop.enclosing = current->loop;
+  loop.start = loopStart;   // already points at the increment if there is one
+  loop.scopeDepth = current->scopeDepth;
+  current->loop = &loop;
+
   statement();
+
+  current->loop = loop.enclosing;
   emitLoop(loopStart);
 //> exit-jump
 
@@ -1410,6 +1431,94 @@ static void ifStatement() {
   patchJump(elseJump);
 //< patch-else
 }
+
+#define MAX_CASES 256
+
+static void switchStatement() {
+  consume(TOKEN_LEFT_PAREN, "Expect '(' after 'switch'.");
+  expression();
+  consume(TOKEN_RIGHT_PAREN, "Expect ')' after value.");
+  consume(TOKEN_LEFT_BRACE, "Expect '{' before switch cases.");
+
+  int state = 0; // 0: before any case, 1: inside a case, 2: inside default
+  int caseEnds[MAX_CASES];
+  int caseCount = 0;
+  int previousCaseSkip = -1;
+
+    bool closed = false;
+  while (!check(TOKEN_EOF)) {
+    if (match(TOKEN_RIGHT_BRACE)) {
+      closed = true;
+      break;
+    }
+
+    if (match(TOKEN_CASE) || match(TOKEN_DEFAULT)) {
+      TokenType caseType = parser.previous.type;
+
+      if (state == 2) {
+        error("Can't have another case or default after the default case.");
+      }
+
+      if (state == 1) {
+        // End of previous case body: jump to end of switch, then land
+        // the previous case's "no match" jump here.
+        if (caseCount == MAX_CASES) {
+          error("Too many cases in switch statement.");
+        } else {
+          caseEnds[caseCount++] = emitJump(OP_JUMP);
+        }
+        patchJump(previousCaseSkip);
+        emitByte(OP_POP); // The comparison result.
+      }
+
+      if (caseType == TOKEN_CASE) {
+        state = 1;
+
+        emitByte(OP_DUP);
+        expression();
+        consume(TOKEN_COLON, "Expect ':' after case value.");
+        emitByte(OP_EQUAL);
+
+        previousCaseSkip = emitJump(OP_JUMP_IF_FALSE);
+        emitByte(OP_POP); // The comparison result.
+        emitByte(OP_POP); // The switch value.
+      } else {
+        state = 2;
+        consume(TOKEN_COLON, "Expect ':' after 'default'.");
+        emitByte(OP_POP); // The switch value.
+      }
+    } else {
+      if (state == 0) {
+        error("Can't have statements before any case.");
+      }
+      statement();
+    }
+  }
+
+  if (!closed) {
+    error("Expect '}' after switch cases.");
+  }
+
+  // Finish off the last case.
+  if (state == 1) {
+    if (caseCount == MAX_CASES) {
+      error("Too many cases in switch statement.");
+    } else {
+      caseEnds[caseCount++] = emitJump(OP_JUMP);
+    }
+    patchJump(previousCaseSkip);
+    emitByte(OP_POP); // The comparison result.
+  }
+
+  // No default clause: the "no match" path still has the switch value.
+  if (state != 2) emitByte(OP_POP);
+
+  for (int i = 0; i < caseCount; i++) {
+    patchJump(caseEnds[i]);
+  }
+}
+
+
 //< Jumping Back and Forth if-statement
 //> Global Variables print-statement
 static void printStatement() {
@@ -1452,14 +1561,45 @@ static void whileStatement() {
 
   int exitJump = emitJump(OP_JUMP_IF_FALSE);
   emitByte(OP_POP);
+
+  Loop loop;
+  loop.enclosing = current->loop;
+  loop.start = loopStart;
+  loop.scopeDepth = current->scopeDepth;
+  current->loop = &loop;
+
   statement();
-//> loop
+
+  current->loop = loop.enclosing;//> loop
   emitLoop(loopStart);
 //< loop
 
   patchJump(exitJump);
   emitByte(OP_POP);
 }
+
+static void continueStatement() {
+  if (current->loop == NULL) {
+    error("Can't use 'continue' outside of a loop.");
+  } else {
+    // Discard locals declared inside the loop body. We only emit the
+    // pops; the locals stay in the array because the code after the
+    // continue still needs them.
+    for (int i = current->localCount - 1;
+         i >= 0 && current->locals[i].depth > current->loop->scopeDepth;
+         i--) {
+      if (current->locals[i].isCaptured) {
+        emitByte(OP_CLOSE_UPVALUE);
+      } else {
+        emitByte(OP_POP);
+      }
+    }
+    emitLoop(current->loop->start);
+  }
+
+  consume(TOKEN_SEMICOLON, "Expect ';' after 'continue'.");
+}
+
 //< Jumping Back and Forth while-statement
 //> Global Variables synchronize
 static void synchronize() {
@@ -1476,6 +1616,8 @@ static void synchronize() {
       case TOKEN_IF:
       case TOKEN_WHILE:
       case TOKEN_PRINT:
+      case TOKEN_SWITCH:
+      case TOKEN_CONTINUE:
       case TOKEN_RETURN:
         return;
 
@@ -1532,6 +1674,10 @@ static void statement() {
 //> Jumping Back and Forth parse-if
   } else if (match(TOKEN_IF)) {
     ifStatement();
+  } else if (match(TOKEN_SWITCH)) {
+    switchStatement();
+  } else if (match(TOKEN_CONTINUE)) {
+    continueStatement();
 //< Jumping Back and Forth parse-if
 //> Calls and Functions match-return
   } else if (match(TOKEN_RETURN)) {

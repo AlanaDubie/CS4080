@@ -538,6 +538,7 @@ static InterpretResult run() {
 //< Types of Values interpret-literals
 //> Global Variables interpret-pop
       case OP_POP: pop(); break;
+      case OP_DUP: push(peek(0)); break;
 //< Global Variables interpret-pop
 //> Local Variables interpret-get-local
       case OP_GET_LOCAL: {
