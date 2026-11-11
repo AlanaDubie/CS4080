@@ -4,6 +4,7 @@
 //< Types of Values include-stdarg
 //> vm-include-stdio
 #include <stdio.h>
+#include <stdlib.h>
 //> Strings vm-include-string
 #include <string.h>
 //< Strings vm-include-string
@@ -96,6 +97,9 @@ static void defineNative(const char* name, NativeFn function) {
 //< Calls and Functions define-native
 
 void initVM() {
+  vm.stackCapacity = STACK_INITIAL;               // CHALLENGE 4
+  vm.stack = (Value*)malloc(sizeof(Value) * vm.stackCapacity);
+  if (vm.stack == NULL) exit(1);
 //> call-reset-stack
   resetStack();
 //< call-reset-stack
@@ -145,12 +149,41 @@ void freeVM() {
 //> Strings call-free-objects
   freeObjects();
 //< Strings call-free-objects
+  free(vm.stack);   // CHALLENGE 4
+  vm.stack = NULL;
 }
-//> push
+
+// CHALLENGE 4: double the stack and fix every pointer into it.
+static void growStack() {
+  Value* oldStack = vm.stack;
+  int newCapacity = vm.stackCapacity * 2;
+
+  Value* newStack = (Value*)malloc(sizeof(Value) * newCapacity);
+  if (newStack == NULL) exit(1);
+  memcpy(newStack, oldStack, sizeof(Value) * vm.stackCapacity);
+
+  // Rebase everything that pointed into the old stack.
+  vm.stackTop = newStack + (vm.stackTop - oldStack);
+  for (int i = 0; i < vm.frameCount; i++) {
+    vm.frames[i].slots = newStack + (vm.frames[i].slots - oldStack);
+  }
+  for (ObjUpvalue* upvalue = vm.openUpvalues; upvalue != NULL;
+       upvalue = upvalue->next) {
+    upvalue->location = newStack + (upvalue->location - oldStack);
+  }
+
+  free(oldStack);
+  vm.stack = newStack;
+  vm.stackCapacity = newCapacity;
+}
+
 void push(Value value) {
+  if (vm.stackTop - vm.stack >= vm.stackCapacity) growStack();
   *vm.stackTop = value;
   vm.stackTop++;
 }
+
+ 
 //< push
 //> pop
 Value pop() {
@@ -421,6 +454,11 @@ static InterpretResult run() {
     (frame->closure->function->chunk.constants.values[READ_BYTE()])
 //< Closures read-constant
 
+// CHALLENGE 2
+#define READ_CONSTANT_LONG() \
+    (frame->closure->function->chunk.constants.values[ \
+        (READ_BYTE() << 16) | (READ_BYTE() << 8) | READ_BYTE()])
+
 //< Calls and Functions run
 //> Global Variables read-string
 #define READ_STRING() AS_STRING(READ_CONSTANT())
@@ -485,6 +523,11 @@ static InterpretResult run() {
 //> push-constant
         push(constant);
 //< push-constant
+        break;
+      }
+      case OP_CONSTANT_LONG: {
+        Value constant = READ_CONSTANT_LONG();
+        push(constant);
         break;
       }
 //< op-constant
@@ -853,6 +896,7 @@ static InterpretResult run() {
 //< Jumping Back and Forth undef-read-short
 //> undef-read-constant
 #undef READ_CONSTANT
+#undef READ_CONSTANT_LONG
 //< undef-read-constant
 //> Global Variables undef-read-string
 #undef READ_STRING

@@ -109,26 +109,25 @@ static ObjString* allocateString(char* chars, int length) {
 */
 //> allocate-string
 //> Hash Tables allocate-string
-static ObjString* allocateString(char* chars, int length,
-                                 uint32_t hash) {
-//< Hash Tables allocate-string
-  ObjString* string = ALLOCATE_OBJ(ObjString, OBJ_STRING);
+static ObjString* allocateString(const char* chars, int length,
+                                 uint32_t hash, bool owns) {
+  size_t size = sizeof(ObjString) + (owns ? length + 1 : 0);
+  ObjString* string = (ObjString*)allocateObject(size, OBJ_STRING);
   string->length = length;
-  string->chars = chars;
-//> Hash Tables allocate-store-hash
   string->hash = hash;
-//< Hash Tables allocate-store-hash
-//> Hash Tables allocate-store-string
-//> Garbage Collection push-string
+  string->ownsChars = owns;
+
+  if (owns) {
+    memcpy(string->data, chars, length);
+    string->data[length] = '\0';
+    string->chars = string->data;
+  } else {
+    string->chars = chars;
+  }
 
   push(OBJ_VAL(string));
-//< Garbage Collection push-string
   tableSet(&vm.strings, string, NIL_VAL);
-//> Garbage Collection pop-string
   pop();
-
-//< Garbage Collection pop-string
-//< Hash Tables allocate-store-string
   return string;
 }
 //< allocate-string
@@ -157,31 +156,30 @@ ObjString* takeString(char* chars, int length) {
     return interned;
   }
 
-//< take-string-intern
-  return allocateString(chars, length, hash);
+  ObjString* string = allocateString(chars, length, hash, true);
+  FREE_ARRAY(char, chars, length + 1);
+  return string;
 //< Hash Tables take-string-hash
 }
 //< take-string
 ObjString* copyString(const char* chars, int length) {
-//> Hash Tables copy-string-hash
   uint32_t hash = hashString(chars, length);
-//> copy-string-intern
   ObjString* interned = tableFindString(&vm.strings, chars, length,
                                         hash);
   if (interned != NULL) return interned;
 
-//< copy-string-intern
-//< Hash Tables copy-string-hash
-  char* heapChars = ALLOCATE(char, length + 1);
-  memcpy(heapChars, chars, length);
-  heapChars[length] = '\0';
-/* Strings object-c < Hash Tables copy-string-allocate
-  return allocateString(heapChars, length);
-*/
-//> Hash Tables copy-string-allocate
-  return allocateString(heapChars, length, hash);
-//< Hash Tables copy-string-allocate
+  return allocateString(chars, length, hash, true);
 }
+
+ObjString* constantString(const char* chars, int length) {
+  uint32_t hash = hashString(chars, length);
+  ObjString* interned = tableFindString(&vm.strings, chars, length,
+                                        hash);
+  if (interned != NULL) return interned;
+
+  return allocateString(chars, length, hash, false);
+}
+
 //> Closures new-upvalue
 ObjUpvalue* newUpvalue(Value* slot) {
   ObjUpvalue* upvalue = ALLOCATE_OBJ(ObjUpvalue, OBJ_UPVALUE);
@@ -240,9 +238,11 @@ void printObject(Value value) {
       printf("<native fn>");
       break;
 //< Calls and Functions print-native
-    case OBJ_STRING:
-      printf("%s", AS_CSTRING(value));
+    case OBJ_STRING: {
+      ObjString* string = AS_STRING(value);
+      printf("%.*s", string->length, string->chars);
       break;
+    }
 //> Closures print-upvalue
     case OBJ_UPVALUE:
       printf("upvalue");
