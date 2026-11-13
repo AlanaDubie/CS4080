@@ -11,7 +11,7 @@
 //> Calls and Functions vm-include-time
 #include <time.h>
 //< Calls and Functions vm-include-time
-
+#include <math.h>
 //< vm-include-stdio
 #include "common.h"
 //> Scanning on Demand vm-include-compiler
@@ -28,9 +28,66 @@
 
 VM vm; // [one]
 //> Calls and Functions clock-native
-static Value clockNative(int argCount, Value* args) {
-  return NUMBER_VAL((double)clock() / CLOCKS_PER_SEC);
+static bool nativeError(Value* result, const char* message) {
+  *result = OBJ_VAL(copyString(message, (int)strlen(message)));
+  return false;
 }
+
+static bool clockNative(int argCount, Value* args, Value* result) {
+  *result = NUMBER_VAL((double)clock() / CLOCKS_PER_SEC);
+  return true;
+}
+
+static bool sqrtNative(int argCount, Value* args, Value* result) {
+  if (!IS_NUMBER(args[0])) {
+    return nativeError(result, "Argument to sqrt() must be a number.");
+  }
+  *result = NUMBER_VAL(sqrt(AS_NUMBER(args[0])));
+  return true;
+}
+
+static bool absNative(int argCount, Value* args, Value* result) {
+  if (!IS_NUMBER(args[0])) {
+    return nativeError(result, "Argument to abs() must be a number.");
+  }
+  *result = NUMBER_VAL(fabs(AS_NUMBER(args[0])));
+  return true;
+}
+
+static bool floorNative(int argCount, Value* args, Value* result) {
+  if (!IS_NUMBER(args[0])) {
+    return nativeError(result, "Argument to floor() must be a number.");
+  }
+  *result = NUMBER_VAL(floor(AS_NUMBER(args[0])));
+  return true;
+}
+
+static bool powNative(int argCount, Value* args, Value* result) {
+  if (!IS_NUMBER(args[0]) || !IS_NUMBER(args[1])) {
+    return nativeError(result, "Arguments to pow() must be numbers.");
+  }
+  *result = NUMBER_VAL(pow(AS_NUMBER(args[0]), AS_NUMBER(args[1])));
+  return true;
+}
+
+static bool maxNative(int argCount, Value* args, Value* result) {
+  if (!IS_NUMBER(args[0]) || !IS_NUMBER(args[1])) {
+    return nativeError(result, "Arguments to max() must be numbers.");
+  }
+  double a = AS_NUMBER(args[0]);
+  double b = AS_NUMBER(args[1]);
+  *result = NUMBER_VAL(a > b ? a : b);
+  return true;
+}
+
+static bool lenNative(int argCount, Value* args, Value* result) {
+  if (!IS_STRING(args[0])) {
+    return nativeError(result, "Argument to len() must be a string.");
+  }
+  *result = NUMBER_VAL(AS_STRING(args[0])->length);
+  return true;
+}
+
 //< Calls and Functions clock-native
 //> reset-stack
 static void resetStack() {
@@ -133,6 +190,12 @@ void initVM() {
 //> Calls and Functions define-native-clock
 
   defineNative("clock", clockNative, 0);
+  defineNative("sqrt", sqrtNative, 1);
+  defineNative("abs", absNative, 1);
+  defineNative("floor", floorNative, 1);
+  defineNative("pow", powNative, 2);
+  defineNative("max", maxNative, 2);
+  defineNative("len", lenNative, 1);
 //< Calls and Functions define-native-clock
 }
 
@@ -287,7 +350,11 @@ static bool callValue(Value callee, int argCount) {
                        native->arity, argCount);
           return false;
         }
-        Value result = native->function(argCount, vm.stackTop - argCount);
+        Value result;
+        if (!native->function(argCount, vm.stackTop - argCount, &result)) {
+          runtimeError("%s", AS_CSTRING(result));
+          return false;
+        }
         vm.stackTop -= argCount + 1;
         push(result);
         return true;
