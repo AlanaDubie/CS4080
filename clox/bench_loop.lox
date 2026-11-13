@@ -1,0 +1,11 @@
+fun loopTest() {
+  var sum = 0;
+  for (var i = 0; i < 10000000; i = i + 1) {
+    sum = sum + i * 2;
+  }
+  return sum;
+}
+
+var start = clock();
+print loopTest();
+print clock() - start;
